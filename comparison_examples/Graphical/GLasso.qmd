@@ -1,0 +1,219 @@
+---
+title: "Simulation Examples for Graphical Models"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: false
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+execute:
+  eval: true
+---
+### Package Setup
+
+```{r}
+if (!require("devtools", quietly = TRUE))
+  install.packages("devtools")
+devtools::install_github("anonstats123/Nullstrap")
+
+
+library(PRROC)
+library(Nullstrap)
+library(MASS)
+library(SILGGM)
+```
+
+
+### Simulation Data Generation
+
+```{r}
+generate_precision_matrix <- function(p, b, graph_type) {
+  # Initialize Omega matrix
+  Omega_0 <- matrix(0, nrow = p, ncol = p)
+  
+  if (graph_type == "band") {
+    # Band graph
+    diag(Omega_0) <- 1
+    for (i in 1:(p-1)) {
+      for (j in (i+1):min(p, i+10)) {
+        Omega_0[i, j] <- sign(b) * abs(b)^(abs(i - j) / 10)
+        Omega_0[j, i] <- Omega_0[i, j]  # Symmetric matrix
+      }
+    }
+    
+  } else if (graph_type == "block") {
+    # Block graph: 10 blocks, each block size 20
+    for (k in seq(1, p, by = 20)) {
+      block_size <- min(20, p - k + 1)
+      Omega_0[k:(k+block_size-1), k:(k+block_size-1)] <- 1
+      Omega_0[k:(k+block_size-1), k:(k+block_size-1)] <- b
+    }
+    
+  } else if (graph_type == "erdos") {
+    # Erdos-Renyi graph
+    diag(Omega_0) <- 1
+    for (i in 1:(p-1)) {
+      for (j in (i+1):p) {
+        if (rbinom(1, 1, 0.1)) {
+          samples_1 <- runif(n, min = -0.6, max = -0.2)  # [-0.6, -0.2]
+          samples_2 <- runif(n, min = 0.2, max = 0.6)    # [0.2, 0.6]
+          phi_ij = combined_samples <- sample(c(samples_1, samples_2), 1)
+          # phi_ij <- sample(c(-0.6, -0.2, 0.2, 0.6), 1)
+          Omega_0[i, j] <- Omega_0[j, i] <- phi_ij
+        }
+      }
+    }
+    
+  } else if (graph_type == "cluster") {
+    # Cluster graph: 5 blocks, each block size 40
+    for (k in seq(1, p, by = 40)) {
+      block_size <- min(40, p - k + 1)
+      Omega_0[k:(k+block_size-1), k:(k+block_size-1)] <- 1
+      for (i in k:(k+block_size-1)) {
+        if (i < (k+block_size-1)) { # in case j exceeds range
+          for (j in (i+1):(k+block_size-1)) {
+            if (rbinom(1, 1, 0.5)) {
+              samples_1 <- runif(n, min = -0.6, max = -0.2)  # [-0.6, -0.2]
+              samples_2 <- runif(n, min = 0.2, max = 0.6)    # [0.2, 0.6]
+              phi_ij = combined_samples <- sample(c(samples_1, samples_2), 1)
+              Omega_0[i, j] <- Omega_0[j, i] <- phi_ij
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  # Make the precision matrix positive definite
+  lambda_min <- eigen(Omega_0)$values[p]
+  Omega <- Omega_0 + (abs(lambda_min) + 0.5) * diag(p)
+  
+  return(Omega)
+}
+
+generate_data <- function(n, p, Omega) {
+  # Generate the precision matrix Omega
+  # Omega <- generate_precision_matrix(p, b, graph_type)
+  
+  # Generate the covariance matrix Sigma
+  Sigma <- solve(Omega)
+  
+  # Generate n samples from N_p(0, Sigma)
+  data <- mvrnorm(n = n, mu = rep(0, p), Sigma = Sigma)
+  
+  return(data)
+}
+
+# Function to obtain the true support of the precision matrix
+obtain_true_support <- function(Omega, threshold = 1e-10) {
+  # Obtain the true support of the precision matrix
+  true_support = matrix(0, nrow = ncol(Omega), ncol = ncol(Omega))
+  true_support[abs(Omega) > threshold] = 1
+  return(true_support)
+}
+
+n <- 2000
+p <- 200
+edge_strength <- -0.8
+Omega <- generate_precision_matrix(p, edge_strength, "band")
+true_support = obtain_true_support(Omega)
+Signal_index = which(true_support[upper.tri(true_support)] == 1)
+true_labels <- true_support[upper.tri(true_support)]
+X <- generate_data(n, p, Omega)
+data_scale = scale(X)
+```
+
+
+### Statistical Metrics Function
+
+```{r}
+aupr = function(statistic) pr.curve(scores.class0 = statistic, 
+                                    weights.class0 = true_labels, 
+                                    curve = FALSE)$auc.integral
+```
+
+
+### Nullstrap
+```{r}
+result_Nullstrap <- nullstrap_filter(
+  X = data_scale, fdr_value = 0.2, best_lambda = NULL, B_reps = NULL, model_type = "graphical"
+)
+Nullstrap_FDR <- length(which(result_Nullstrap$statistic[setdiff(1:length(result_Nullstrap$statistic), 
+                                                           Signal_index)] >= 
+                             result_Nullstrap$threshold)) / max(length(result_Nullstrap$selected), 1)
+Nullstrap_Power <- (length(which(result_Nullstrap$statistic[Signal_index] >=
+                                    result_Nullstrap$threshold))) / (length(Signal_index))
+Nullstrap_AUPR <- aupr(result_Nullstrap$statistic)
+cat("Nullstrap FDR:", Nullstrap_FDR, "\n")
+cat("Nullstrap Power:", Nullstrap_Power, "\n")
+cat("Nullstrap AUPR:", Nullstrap_AUPR, "\n")
+```
+
+
+### GFC-L
+```{r}
+result_GFCL <- SILGGM(data_scale, method = "GFC_L", alpha = 0.2,
+                                    true_graph = Omega)
+GFCL_Power = result_GFCL$power
+GFCL_FDR = result_GFCL$FDR
+GFCL_AUPR = aupr(abs(result_GFCL$T_stat[upper.tri(result_GFCL$T_stat)]))
+cat("GFC-L FDR:", GFCL_FDR, "\n")
+cat("GFC-L Power:", GFCL_Power, "\n")
+cat("GFC-L AUPR:", GFCL_AUPR, "\n")
+```
+
+### GFC-SL
+```{r}
+result_GFCS <- SILGGM(data_scale, method = "GFC_SL", alpha = 0.2,
+                                  true_graph = Omega)
+GFCS_Power = result_GFCS$power
+GFCS_FDR = result_GFCS$FDR
+GFCS_AUPR = aupr(abs(result_GFCS$T_stat[upper.tri(result_GFCS$T_stat)]))
+cat("GFC-SL FDR:", GFCS_FDR, "\n")
+cat("GFC-SL Power:", GFCS_Power, "\n")
+cat("GFC-SL AUPR:", GFCS_AUPR, "\n")
+```
+
+
+### KO2
+```{r}
+source("./Knockoff.R")
+trueNoneConnections <- which(true_support == 0)
+ko.est <- GraphEstimation(data_scale, FDRtarget = 0.2, plus = FALSE)
+ko.adj <- ko.est$adjacency.matrix
+if(dim(ko.est$edge.set)[1]==0){
+  ko.err<-0
+} else {
+  ko.FP <- ko.adj[trueNoneConnections]
+  ko.err <- length(which(ko.FP == 1))
+}
+ko2_FDR <- ko.err / max(1, length(which(ko.adj == 1)) )
+ko2_Power <- (length(which(ko.adj == 1)) - 
+            ko.err) / max(1, length(which(true_support == 1)))
+ko2_AUPR = aupr(abs(ko.est$continuous.raw[upper.tri(ko.est$continuous.raw)]))
+cat("KO2 FDR:", ko2_FDR, "\n")
+cat("KO2 Power:", ko2_Power, "\n")
+cat("KO2 AUPR:", ko2_AUPR, "\n")
+```
+
+
+### Data Splitting
+```{r}
+source("./DS_graph.R")
+source("./fdp_power_graph.R")
+source("./analys_graph.R")
+selected_ds <- DS_graph(data_scale, q = 0.2, num_split = 1)
+result_ds = fdp_power_graph(selected_ds$DS_selected_edge, true_support)
+ds_Power <- result_ds$power
+ds_FDR <- result_ds$fdp
+ds_AUPR = aupr(abs(selected_ds$DS_statistic[upper.tri(selected_ds$DS_statistic)]))
+cat("Data Splitting FDR:", ds_FDR, "\n")
+cat("Data Splitting Power:", ds_Power, "\n")
+cat("Data Splitting AUPR:", ds_AUPR, "\n")
+```
+
+
+

@@ -1,0 +1,116 @@
+---
+title: "Simulation Examples for Cox Models"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: false
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+execute:
+  eval: true
+---
+### Package Setup
+
+```{r}
+if (!require("devtools", quietly = TRUE))
+  install.packages("devtools")
+devtools::install_github("anonstats123/Nullstrap")
+
+
+library(PRROC)
+library(Nullstrap)
+library(MASS)
+library(knockoff)
+library(survival)
+library(simsurv)
+```
+
+
+### Simulation Data Generation
+
+```{r}
+n <- 400
+p <- 200
+nonzero_coefs <- 30
+Amp <- 5
+beta <- rep(0, p) 
+beta[1:nonzero_coefs] <- Amp
+names(beta) = paste0("X", 1:p)
+rho <- 0.6
+Theta.8 <- toeplitz(rho^(0:(p - 1)))
+X <- mvrnorm(n, rep(0, p), Sigma = Theta.8)
+X <- scale(X)/(sqrt(n))
+colnames(X) = paste0("X", 1:p)
+Signal_index <- 1:nonzero_coefs
+true_labels <- beta != 0
+surv_time <- simsurv(lambdas = 1, gammas = 1, betas = beta, x = as.data.frame(X))
+surv_time = surv_time$eventtime
+status <- rep(1, n)
+time <- surv_time
+y <- cbind(time = time, status = status)
+
+```
+
+
+### Statistical Metrics Function
+
+```{r}
+fdp = function(selected) sum(beta[selected] == 0) / max(1, length(selected))
+power = function(selected) sum(beta[selected] != 0) / sum(beta != 0)
+aupr = function(statistic) pr.curve(scores.class0 = statistic,
+                                    weights.class0 = true_labels,
+                                    curve = FALSE)$auc.integral
+```
+
+
+### Nullstrap
+```{r}
+result_Nullstrap <- nullstrap_filter(
+  X, y, fdr_value = 0.1, best_lambda = NULL, B_reps = NULL, model_type = "cox"
+)
+Nullstrap_FDR <- length(which(result_Nullstrap$statistic[setdiff(1:p, Signal_index)] >= 
+                             result_Nullstrap$threshold)) / max(length(result_Nullstrap$selected), 1)
+Nullstrap_Power <- length(which(result_Nullstrap$statistic[Signal_index] >= 
+                               result_Nullstrap$threshold)) / length(Signal_index)
+Nullstrap_AUPR <- aupr(result_Nullstrap$statistic)
+cat("Nullstrap FDR:", Nullstrap_FDR, "\n")
+cat("Nullstrap Power:", Nullstrap_Power, "\n")
+cat("Nullstrap AUPR:", Nullstrap_AUPR, "\n")
+```
+
+
+### Model-X
+```{r}
+mx_knockoff = create.second_order(X)
+mx_statistic = stat.glmnet_coefdiff(X, mx_knockoff, y, 
+                                    family = "cox")
+mx_thres = knockoff.threshold(mx_statistic, fdr = 0.1)
+mx_selected = which(mx_statistic >= mx_thres) 
+mx_FDR = fdp(mx_selected)
+mx_Power = power(mx_selected)
+mx_AUPR = aupr(abs(mx_statistic))
+cat("Model-X FDR:", mx_FDR, "\n")
+cat("Model-X Power:", mx_Power, "\n")
+cat("Model-X AUPR:", mx_AUPR, "\n")
+```
+
+
+### Fixed-X
+```{r}
+fx_knockoff = create.fixed(X)$Xk
+fx_statistic = stat.glmnet_lambdasmax(X, fx_knockoff, y, 
+                                      family = "cox")
+fx_thres = knockoff.threshold(fx_statistic, fdr = 0.1)
+fx_selected = which(fx_statistic >= fx_thres)
+fx_FDR = fdp(fx_selected)
+fx_Power = power(fx_selected)
+fx_AUPR = aupr(abs(fx_statistic))
+cat("Fixed-X FDR:", fx_FDR, "\n")
+cat("Fixed-X Power:", fx_Power, "\n")
+cat("Fixed-X AUPR:", fx_AUPR, "\n")
+```
+
+

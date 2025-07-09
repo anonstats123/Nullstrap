@@ -1,0 +1,136 @@
+---
+title: "Simulation Examples for Generalized Linear Models"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: false
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+execute:
+  eval: true
+---
+### Package Setup
+
+```{r}
+if (!require("devtools", quietly = TRUE))
+  install.packages("devtools")
+devtools::install_github("anonstats123/Nullstrap")
+
+
+library(PRROC)
+library(Nullstrap)
+library(MASS)
+library(knockoff)
+```
+
+
+### Simulation Data Generation
+
+```{r}
+n <- 500  
+p <- 100  
+nonzero_coefs <- 20  
+Amp <- 9
+rho <- 0.6
+Theta.8 <- toeplitz(rho^(0:(p - 1)))
+X <- mvrnorm(n, rep(0, p), Sigma = Theta.8)
+X = scale(X)/(sqrt(n))
+beta <- rep(0, p)
+beta[1:nonzero_coefs] <- sample(c(-Amp, Amp), nonzero_coefs, replace = TRUE)
+Signal_index <- 1:nonzero_coefs
+true_labels <- beta != 0
+linear_predictor <- X %*% beta
+prob <- 1 / (1 + exp(-linear_predictor))  # logistic function
+y <- rbinom(n, 1, prob)
+```
+
+
+### Statistical Metrics Function
+
+```{r}
+fdp = function(selected) sum(beta[selected] == 0) / max(1, length(selected))
+power = function(selected) sum(beta[selected] != 0) / sum(beta != 0)
+aupr = function(statistic) pr.curve(scores.class0 = statistic,
+                                    weights.class0 = true_labels,
+                                    curve = FALSE)$auc.integral
+```
+
+
+### Nullstrap
+```{r}
+result_Nullstrap <- nullstrap_filter(
+  X, y, fdr_value = 0.1, best_lambda = NULL, B_reps = NULL, model_type = "glm"
+)
+Nullstrap_FDR <- length(which(result_Nullstrap$statistic[setdiff(1:p, Signal_index)] >= 
+                             result_Nullstrap$threshold)) / max(length(result_Nullstrap$selected), 1)
+Nullstrap_Power <- length(which(result_Nullstrap$statistic[Signal_index] >= 
+                               result_Nullstrap$threshold)) / length(Signal_index)
+Nullstrap_AUPR <- aupr(result_Nullstrap$statistic)
+cat("Nullstrap FDR:", Nullstrap_FDR, "\n")
+cat("Nullstrap Power:", Nullstrap_Power, "\n")
+cat("Nullstrap AUPR:", Nullstrap_AUPR, "\n")
+```
+
+
+### Model-X
+```{r}
+mx_knockoff = create.second_order(X)
+mx_statistic = stat.glmnet_coefdiff(X, mx_knockoff, y, 
+                                    family = "binomial")
+mx_thres = knockoff.threshold(mx_statistic, fdr = 0.1)
+mx_selected = which(mx_statistic >= mx_thres) 
+mx_FDR = fdp(mx_selected)
+mx_Power = power(mx_selected)
+mx_AUPR = aupr(abs(mx_statistic))
+cat("Model-X FDR:", mx_FDR, "\n")
+cat("Model-X Power:", mx_Power, "\n")
+cat("Model-X AUPR:", mx_AUPR, "\n")
+```
+
+
+### Fixed-X
+```{r}
+fx_knockoff = create.fixed(X)$Xk
+fx_statistic = stat.glmnet_lambdasmax(X, fx_knockoff, y, 
+                                      family = "binomial")
+fx_thres = knockoff.threshold(fx_statistic, fdr = 0.1)
+fx_selected = which(fx_statistic >= fx_thres)
+fx_FDR = fdp(fx_selected)
+fx_Power = power(fx_selected)
+fx_AUPR = aupr(abs(fx_statistic))
+cat("Fixed-X FDR:", fx_FDR, "\n")
+cat("Fixed-X Power:", fx_Power, "\n")
+cat("Fixed-X AUPR:", fx_AUPR, "\n")
+```
+
+
+### Data Splitting
+```{r}
+source("./DS.R")
+source("./analys.R")
+result_ds <- DS(X, y, num_split = 1, q = 0.1)
+ds_FDR <- fdp(result_ds$DS_feature)
+ds_Power <- power(result_ds$DS_feature)
+ds_AUPR = aupr(abs(result_ds$DS_statistic))
+cat("Data Splitting FDR:", ds_FDR, "\n")
+cat("Data Splitting Power:", ds_Power, "\n")
+cat("Data Splitting AUPR:", ds_AUPR, "\n")
+```
+
+
+### Multiple Data Splitting
+```{r}
+source("./DS.R")
+source("./analys.R")
+result_mds <- DS(X, y, num_split = 50, q = 0.1)
+mds_FDR <- fdp(result_mds$MDS_feature)
+mds_Power <- power(result_mds$MDS_feature)
+mds_AUPR = aupr(abs(result_mds$MDS_statistic))
+cat("Multiple Data Splitting FDR:", mds_FDR, "\n")
+cat("Multiple Data Splitting Power:", mds_Power, "\n")
+cat("Multiple Data Splitting AUPR:", mds_AUPR, "\n")
+```
+
