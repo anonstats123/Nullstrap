@@ -1,0 +1,21 @@
+Package: Nullstrap
+Type: Package
+Title: Null Bootstrap for FDR Control
+Version: 0.0.0.9000
+Authors@R: 
+      person("Anonymous", email = "anon@example.com", role = c("aut", "cre"))
+Description: Provides tools for variable selection with false discovery rate (FDR) control using the Nullstrap method, which generates synthetic null data and applies model-agnostic thresholding. Supports linear, GLM, Cox, and graphical models.
+License: MIT
+Encoding: UTF-8
+Imports:
+    glmnet,
+    MASS,
+    parallel,
+    PRROC,
+    survival,
+    eha,
+    simsurv,
+    huge,
+    glasso
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
