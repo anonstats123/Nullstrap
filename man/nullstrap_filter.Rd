@@ -54,6 +54,7 @@ Returns a list containing the following elements:
 This function runs the full Nullstrap procedure to identify significant variables under a user-specified FDR threshold.
 }
 \examples{
+library(MASS)
 n <- 2000
 p <- 1000
 s <- 30
