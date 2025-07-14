@@ -32,6 +32,7 @@
 #' }
 #'
 #' @examples
+#' library(MASS)
 #' n <- 2000
 #' p <- 1000
 #' s <- 30
