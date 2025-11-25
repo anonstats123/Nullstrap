@@ -23,6 +23,8 @@
 #' @param dist_type Type of distribution for the error term. Applicable only to linear models.
 #' The default is \code{"normal"}.
 #' @param model_type Type of model, must be one of "linear", "glm", "cox", "graphical".
+#' @param is_intercept Logical value indicating whether to include an intercept in the model. The default is \code{FALSE}.
+#' For generalized linear models, it can be set to \code{TRUE} or \code{FALSE}. For all other model types, it uses the default value.
 #'
 #' @return Returns a list containing the following elements:
 #' \describe{
@@ -73,7 +75,7 @@
 
 
 nullstrap_filter <- function(X, y, fdr_value, best_lambda = NULL, B_reps = NULL,
-                     dist_type = "normal", model_type) {
+                     dist_type = "normal", model_type, is_intercept = FALSE) {
 
   library(glmnet)
   library(MASS)
@@ -373,21 +375,14 @@ nullstrap_filter <- function(X, y, fdr_value, best_lambda = NULL, B_reps = NULL,
       }
       return(right_correction)
     }
-
+    
     n = nrow(X)
     p = ncol(X)
-    X = scale(X)/(sqrt(n))
-    # Generate beta (true coefficients)
-
+    X = scale(X, center = TRUE, scale = TRUE)/sqrt(n)
+    X = as.matrix(X)
     beta_0 <- rep(0, p)
-    # X_snp <- matrix(rnorm(n * p, mean = 0, sd = 1 / sqrt(n) ), nrow = n, ncol = p)
-    linear_predictor <- X %*% beta_0
-    # Generate binary response y (from binomial model with logit link function)
-    prob <- 1 / (1 + exp(-linear_predictor))  # logistic function
-    y_snp <- rbinom(n, 1, prob)  # binary response
     cv_lasso <- cv.glmnet(X, y, alpha = 1, family = "binomial", measure = "mse")
-
-
+    
     if (is.null(best_lambda)) {
       best_lambda <- 0.5 * cv_lasso$lambda.1se
     }
@@ -395,7 +390,24 @@ nullstrap_filter <- function(X, y, fdr_value, best_lambda = NULL, B_reps = NULL,
                                thresh = 1e-10, family = "binomial")
     coef_beta = abs(as.vector(best_lasso_model$beta))
     coef_corr = as.vector(best_lasso_model$beta)
-
+    
+    if (is_intercept != "True") {
+      intercept = 0
+    } else {
+      intercept = best_lasso_model$a0
+    }
+    linear_predictor <- X %*% beta_0 + intercept
+    # Generate binary response y (from binomial model with logit link function)
+    prob <- 1 / (1 + exp(-linear_predictor))  # logistic function
+    y_snp <- rbinom(n, 1, prob)  # binary response
+    if ((sum(y_snp == 1)) < 2) {
+      y_snp[1] = 1
+      y_snp[2] = 1
+    } else if ((sum(y_snp == 0)) < 2) {
+      y_snp[1] = 0
+      y_snp[2] = 0
+    }
+    
     snp_lasso_model <- glmnet(X, y_snp, alpha = 1, lambda = best_lambda,
                               thresh = 1e-10, family = "binomial")
     nu_vec = c()
