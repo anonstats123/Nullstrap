@@ -11,7 +11,8 @@ nullstrap_filter(
   best_lambda = NULL,
   B_reps = NULL,
   dist_type = "normal",
-  model_type
+  model_type,
+  is_intercept = FALSE
 )
 }
 \arguments{
@@ -41,6 +42,9 @@ For graphical models, the default is 2.}
 The default is \code{"normal"}.}
 
 \item{model_type}{Type of model, must be one of "linear", "glm", "cox", "graphical".}
+
+\item{is_intercept}{Logical value indicating whether to include an intercept in the model. The default is \code{FALSE}.
+For generalized linear models, it can be set to \code{TRUE} or \code{FALSE}. For all other model types, it uses the default value.}
 }
 \value{
 Returns a list containing the following elements:
