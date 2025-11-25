@@ -78,7 +78,8 @@ prob <- 1 / (1 + exp(-linear_predictor))  # logistic function
 y <- rbinom(n, 1, prob)
 
 result_glm <- nullstrap_filter(
-  X, y, fdr_value = 0.1, best_lambda = NULL, B_reps = NULL, model_type = "glm"
+  X, y, fdr_value = 0.1, best_lambda = NULL, B_reps = NULL, model_type = "glm",
+  is_intercept = TRUE
 )
 ```
 
